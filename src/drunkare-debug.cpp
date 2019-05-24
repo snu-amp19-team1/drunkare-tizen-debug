@@ -28,15 +28,15 @@
 
 using TMeasure = Measure<NUM_CHANNELS, DURATION>;
 
-static std::vector<std::string> contexts = {"drink", "eat", "cafe", "desk"};
-static std::vector<std::pair<int, int>> ofs = {
-    {50, 50}, {190, 50}, {50, 190}, {190, 190}};
+static std::vector<std::string> btnLabels = {"start", "stop"};
+static std::vector<std::pair<int, int>> btnOfs = {{50, 110}, {190, 110}};
 
 struct appdata_s {
   Evas_Object *win;
   Evas_Object *conform;
   Evas_Object *label;
-  std::vector<Evas_Object *> buttons;
+  std::vector<Evas_Object *> startBtn;
+  std::vector<Evas_Object *> stopBtn;
   std::string response; // TODO: delete this
 
   // Extra app data
@@ -89,26 +89,16 @@ static void* netWorkerJob(void* data) {
     if (!tMeasure)
       break;
 
-    // std::ofstream ofs;
-    // ofs.open(ad->pathname.c_str() , ofs.app);
-
     std::string jsonObj = tMeasure->formatJson();
 
     // {url}:{port}/{username}
     std::string url = "localhost:8888/anonymous";
-
-    // if (!ofs.is_open()) {
-    //   dlog_print(DLOG_DEBUG, "fsWorkerJob", "[-] ofs.is_open()");
-    // } else {
-    //   ofs << tMeasure->format() << '\n';
-    // }
 
     /* Curl POST */
     curl_global_init(CURL_GLOBAL_ALL);
     curl = curl_easy_init();
 
     struct curl_slist *headers = NULL;
-    // headers = curl_slist_append(headers, "Accept: application/json");
     headers = curl_slist_append(headers, "Content-Type: application/json");
     headers = curl_slist_append(headers, "charsets: utf-8");
 
@@ -116,7 +106,6 @@ static void* netWorkerJob(void* data) {
     curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "POST");
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, jsonObj.c_str());
-    // curl_easy_setopt(curl, CURLOPT_USERAGENT, "libcrp/0.1");
 
     res = curl_easy_perform(curl);
     if (res != CURLE_OK) {
@@ -164,8 +153,8 @@ void sensorCb(sensor_h sensor, sensor_event_s *event, void *user_data)
     ad->tMeasures[sensor_type].push_back(
         std::make_unique<TMeasure>(ad->_measureId[sensor_type]++,
                                    sensor_type, ad->_context, timestamp));
-    dlog_print(DLOG_DEBUG, LOG_TAG, "tMeasure ( %d ) is created.",
-               ad->_measureId[sensor_type] - 1);
+    // dlog_print(DLOG_DEBUG, LOG_TAG, "tMeasure ( %d ) is created.",
+    //            ad->_measureId[sensor_type] - 1);
   }
 
   // Tick (store values in Measure.data every periods)
@@ -173,8 +162,8 @@ void sensorCb(sensor_h sensor, sensor_event_s *event, void *user_data)
 
   // Check Measure->_done and enqueue
   if (ad->tMeasures[sensor_type].front()->_done) {
-    dlog_print(DLOG_DEBUG, LOG_TAG, "tMeasure ( %d ) is done.",
-               ad->_measureId[sensor_type] - 1);
+    // dlog_print(DLOG_DEBUG, LOG_TAG, "tMeasure ( %d ) is done.",
+    //            ad->_measureId[sensor_type] - 1);
 
     ad->_doneMeasureId[sensor_type] = ad->tMeasures[sensor_type].front()->_id;
 
@@ -203,7 +192,7 @@ static void startMeasurement(appdata_s *ad)
 
   // Create thread here
   if (pthread_create(&ad->fsWorker, nullptr, netWorkerJob, (void *)ad) < 0) {
-    dlog_print(DLOG_ERROR, "btnClickedCb", "[-] pthread_create()");
+    // dlog_print(DLOG_ERROR, "btnClickedCb", "[-] pthread_create()");
     return;
   };
 
@@ -233,7 +222,7 @@ static void stopMeasurement(appdata_s *ad)
     //            ad->_measureId[i]);
   }
 
-  for (auto button : ad->buttons) {
+  for (auto button : ad->startBtn) {
     elm_object_disabled_set(button, EINA_FALSE);
   }
 
@@ -241,33 +230,17 @@ static void stopMeasurement(appdata_s *ad)
   efl_util_set_window_screen_mode(ad->win, EFL_UTIL_SCREEN_MODE_DEFAULT);
 }
 
-static void btnClickedCb(void *data, Evas_Object *obj, void *event_info)
+static void startBtnClickedCb(void *data, Evas_Object *obj, void *event_info)
 {
   appdata_s* ad = (appdata_s *)data;
 
   // 1. Set screen always on (This is due to hardware limitation)
   efl_util_set_window_screen_mode(ad->win, EFL_UTIL_SCREEN_MODE_ALWAYS_ON);
 
-  // 2. Set context
-  try {
-    std::string context = std::string(elm_object_text_get(obj));
-
-    if (context == "drink")
-      ad->_context = 0;
-    else if (context == "eat")
-      ad->_context = 1;
-    else if (context == "cafe")
-      ad->_context = 2;
-    else if (context == "desk")
-      ad->_context = 3;
-    else
-      throw std::exception();
-  } catch (const std::exception& e) {
-    dlog_print(DLOG_ERROR, "btnClickedCb", "[-] %s", e.what());
-  }
+  ad->_context = 0;
 
   if (!ad->_isMeasuring) {
-    for (auto button : ad->buttons) {
+    for (auto button : ad->startBtn) {
       elm_object_disabled_set(button, EINA_TRUE);
     }
 
@@ -275,20 +248,30 @@ static void btnClickedCb(void *data, Evas_Object *obj, void *event_info)
   }
 }
 
+static void stopBtnClickedCb(void *data, Evas_Object *obj, void *event_info)
+{
+  stopMeasurement((appdata_s*)data);
+}
+
 static void
 init_buttons(appdata_s *ad,
-            void (*cb)(void *data, Evas_Object *obj, void *event_info))
-{
-  for (int i = 0; i < NUM_CONTEXTS; i++) {
-    auto button = elm_button_add(ad->win);
-    evas_object_smart_callback_add(button, "clicked", cb, ad);
-    ad->buttons.push_back(button);
-    evas_object_move(button, ofs[i].first, ofs[i].second);
-    evas_object_resize(button, 120, 120);
-    elm_object_text_set(button, contexts[i].c_str());
-    evas_object_show(button);
-    ad->buttons.push_back(button);
-  }
+             void (*start_cb)(void *data, Evas_Object *obj, void *event_info),
+             void (*stop_cb)(void *data, Evas_Object *obj, void *event_info)) {
+  auto startBtn =  elm_button_add(ad->win);
+  evas_object_smart_callback_add(startBtn, "clicked", start_cb, ad);
+  evas_object_move(startBtn, btnOfs[0].first, btnOfs[0].second);
+  evas_object_resize(startBtn, 120, 120);
+  elm_object_text_set(startBtn, btnLabels[0].c_str());
+  evas_object_show(startBtn);
+  ad->startBtn.push_back(startBtn);
+
+  auto stopBtn =  elm_button_add(ad->win);
+  evas_object_smart_callback_add(stopBtn, "clicked", stop_cb, ad);
+  evas_object_move(stopBtn, btnOfs[1].first, btnOfs[1].second);
+  evas_object_resize(stopBtn, 120, 120);
+  elm_object_text_set(stopBtn, btnLabels[1].c_str());
+  evas_object_show(stopBtn);
+  ad->stopBtn.push_back(stopBtn);
 }
 
 static void
@@ -330,7 +313,7 @@ create_base_gui(appdata_s *ad)
         /* Custom initializations are here! */
         ad->response = ""; // TODO: delete this
         ad->_isMeasuring = false;
-        init_buttons(ad, btnClickedCb);
+        init_buttons(ad, startBtnClickedCb, stopBtnClickedCb);
         sensor_get_default_sensor(SENSOR_ACCELEROMETER, &ad->sensors[ACCELEROMETER]);
         sensor_get_default_sensor(SENSOR_GYROSCOPE, &ad->sensors[GYROSCOPE]);
         for (int i = 0; i < NUM_SENSORS; i++) {
