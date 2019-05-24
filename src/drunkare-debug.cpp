@@ -92,7 +92,7 @@ static void* netWorkerJob(void* data) {
     std::string jsonObj = tMeasure->formatJson();
 
     // {url}:{port}/{username}
-    std::string url = "localhost:8888/anonymous";
+    std::string url = "localhost:8080/data/";
 
     /* Curl POST */
     curl_global_init(CURL_GLOBAL_ALL);

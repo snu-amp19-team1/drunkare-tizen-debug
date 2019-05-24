@@ -78,7 +78,8 @@ struct Measure {
 	   }
 	 }
 
-	 std::string jsonObj = "{\"id\":" + std::to_string(_id) + ",\"timestamps\":" + timestamps + ",\"" + sensor_type + "\":{\"x\":[" + data[0] + "],\"y\":[" + data[1] + "],\"z\":[" + data[2] + "]}}";
+         /* NOTE: Hardcoded user_id */
+	 std::string jsonObj = "{\"user_id\":0, \"id\":" + std::to_string(_id) + ",\"timestamps\":" + timestamps + ",\"" + sensor_type + "\":{\"x\":[" + data[0] + "],\"y\":[" + data[1] + "],\"z\":[" + data[2] + "]}}";
 	 return jsonObj;
   }
 
