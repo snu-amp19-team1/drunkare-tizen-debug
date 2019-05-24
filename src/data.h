@@ -9,7 +9,7 @@
 //
 template <std::size_t C, std::size_t D>
 struct Measure {
-  static const int _samplingPeriod = 10;       // ms
+  static const int _samplingPeriod = 40;       // ms
   static const int _deviceSamplingPeriod = 10; // ms
 
   constexpr std::size_t _numChannels() { return C; }
