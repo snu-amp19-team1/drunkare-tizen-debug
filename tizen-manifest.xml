@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<manifest xmlns="http://tizen.org/ns/packages" api-version="4.0" package="com.drunkare.debug" version="1.0.0">
+    <profile name="wearable"/>
+    <ui-application appid="com.drunkare.debug" exec="drunkare-debug" multiple="false" nodisplay="false" taskmanage="true" type="capp">
+        <label>drunkare-debug</label>
+        <icon>drunkare-debug.png</icon>
+    </ui-application>
+    <privileges>
+        <privilege>http://tizen.org/privilege/internet</privilege>
+        <privilege>http://tizen.org/privilege/display</privilege>
+        <privilege>http://tizen.org/privilege/externalstorage.appdata</privilege>
+        <privilege>http://tizen.org/privilege/power</privilege>
+    </privileges>
+</manifest>
