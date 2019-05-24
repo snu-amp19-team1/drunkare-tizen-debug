@@ -78,7 +78,7 @@ struct Measure {
 	   }
 	 }
 
-	 std::string jsonObj = "{\"timestamps\":" + timestamps + ",\"" + sensor_type + "\":{\"x\":[" + data[0] + "],\"y\":[" + data[1] + "],\"z\":[" + data[2] + "]}}";
+	 std::string jsonObj = "{\"id\":" + std::to_string(_id) + ",\"timestamps\":" + timestamps + ",\"" + sensor_type + "\":{\"x\":[" + data[0] + "],\"y\":[" + data[1] + "],\"z\":[" + data[2] + "]}}";
 	 return jsonObj;
   }
 
