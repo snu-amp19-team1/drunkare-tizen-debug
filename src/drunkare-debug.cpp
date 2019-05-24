@@ -110,6 +110,10 @@ static void* netWorkerJob(void* data) {
     res = curl_easy_perform(curl);
     if (res != CURLE_OK) {
     	pthread_exit(NULL);
+
+        for (auto button : ad->startBtn) {
+          elm_object_disabled_set(button, EINA_FALSE);
+        }
     }
 
     curl_easy_cleanup(curl);
