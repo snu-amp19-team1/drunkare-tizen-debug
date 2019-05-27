@@ -194,13 +194,19 @@ static void startMeasurement(appdata_s *ad)
 {
   ad->queue.clear();
 
+  // See https://stackoverflow.com/questions/49752776
+  device_power_request_lock(POWER_LOCK_CPU, 0);
+
   // Create thread here
   if (pthread_create(&ad->fsWorker, nullptr, netWorkerJob, (void *)ad) < 0) {
     // dlog_print(DLOG_ERROR, "btnClickedCb", "[-] pthread_create()");
     return;
   };
 
+  // See https://stackoverflow.com/questions/49752776
   for (int i = 0; i < NUM_SENSORS; i++) {
+    sensor_listener_set_option(ad->listners[i], SENSOR_OPTION_ALWAYS_ON);
+    sensor_listener_set_attribute_int(ad->listners[i], SENSOR_ATTRIBUTE_PAUSE_POLICY, SENSOR_PAUSE_NONE);
     sensor_listener_set_event_cb(ad->listners[i], ad->_deviceSamplingRate,
                                  sensorCb, ad);
     sensor_listener_start(ad->listners[i]);
@@ -211,6 +217,8 @@ static void startMeasurement(appdata_s *ad)
 static void stopMeasurement(appdata_s *ad)
 {
   ad->_isMeasuring = false;
+
+  device_power_release_lock(POWER_LOCK_CPU);
 
   for (int i = 0; i < NUM_SENSORS; i++) {
     sensor_listener_stop(ad->listners[i]);
@@ -231,7 +239,7 @@ static void stopMeasurement(appdata_s *ad)
   }
 
   // Set screen to default mode
-  efl_util_set_window_screen_mode(ad->win, EFL_UTIL_SCREEN_MODE_DEFAULT);
+  // efl_util_set_window_screen_mode(ad->win, EFL_UTIL_SCREEN_MODE_DEFAULT);
 }
 
 static void startBtnClickedCb(void *data, Evas_Object *obj, void *event_info)
@@ -239,7 +247,7 @@ static void startBtnClickedCb(void *data, Evas_Object *obj, void *event_info)
   appdata_s* ad = (appdata_s *)data;
 
   // 1. Set screen always on (This is due to hardware limitation)
-  efl_util_set_window_screen_mode(ad->win, EFL_UTIL_SCREEN_MODE_ALWAYS_ON);
+  // efl_util_set_window_screen_mode(ad->win, EFL_UTIL_SCREEN_MODE_ALWAYS_ON);
 
   ad->_context = 0;
 

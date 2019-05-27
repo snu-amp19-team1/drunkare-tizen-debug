@@ -3,7 +3,10 @@
     <profile name="wearable"/>
     <ui-application appid="com.drunkare.debug" exec="drunkare-debug" multiple="false" nodisplay="false" taskmanage="true" type="capp">
         <label>drunkare-debug</label>
-        <icon>drunkare-debug.png</icon>
+        <icon>favicon.png</icon>
+        <background-category value="sensor"/>
+        <background-category value="background-network"/>
+        <background-category value="iot-communication"/>
     </ui-application>
     <privileges>
         <privilege>http://tizen.org/privilege/internet</privilege>
