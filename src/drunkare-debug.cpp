@@ -12,7 +12,11 @@
 #include <sensor.h>
 #include <privacy_privilege_manager.h>
 #include <efl_util.h>
+#include <service_app.h>
+#include <app_alarm.h>
+#include <app_control.h>
 #include <device/power.h>
+#include <Ecore.h>
 #include <curl/curl.h>
 
 #include "drunkare-debug.h"
@@ -27,6 +31,8 @@
 #define MAX_MEASURE_ID (CONTEXT_DURATION / DURATION)
 #define ACCELEROMETER 0
 #define GYROSCOPE 1
+
+static location_service_state_e service_state;
 
 using TMeasure = Measure<NUM_CHANNELS, DURATION>;
 
@@ -60,8 +66,14 @@ struct appdata_s {
   std::string pathname;
 
   location_manager_h location;
+  Ecore_Timer *timer;
+  int alarm_id;
 
-  appdata_s() : win(nullptr), location(nullptr) {}
+  bool location_available;
+  double user_latitude;
+  double user_longitude;
+
+  appdata_s() : win(nullptr), location(nullptr), location_available(false) {}
 };
 
 static void win_delete_request_cb(void *data, Evas_Object *obj,
@@ -81,6 +93,38 @@ win_back_cb(void *data, Evas_Object *obj, void *event_info)
  * Location manager functions ================================
  */
 static void
+__state_changed_cb(location_service_state_e state, void* user_data)
+{
+  double altitude;
+  double latitude;
+  double longitude;
+  double climb;
+  double direction;
+  double speed;
+  double horizontal;
+  double vertical;
+  location_accuracy_level_e level;
+  time_t timestamp;
+  int ret;
+
+  appdata_s *ad = (appdata_s *)user_data;
+
+  if (state == LOCATIONS_SERVICE_ENABLED) {
+    dlog_print(DLOG_INFO, LOG_TAG, "[+] LOCATIONS_SERVICE_ENABLED");
+    ret = location_manager_get_location(
+        ad->location, &altitude, &latitude, &longitude, &climb, &direction, &speed,
+        &level, &horizontal, &vertical, &timestamp);
+
+    ad->location_available = true;
+    ad->user_longitude = longitude;
+    ad->user_latitude = latitude;
+
+  } else {
+    dlog_print(DLOG_INFO, LOG_TAG, "[+] LOCATIONS_SERVICE_DISABLED");
+  }
+}
+
+static void
 create_location_service(void *data)
 {
   appdata_s *ad = (appdata_s *)data;
@@ -94,8 +138,25 @@ create_location_service(void *data)
                "[-] location_manager_create() failed. (%d)", ret);
   } else {
     ad->location = manager;
-    ret = location_manager_set_position_updated_cb(
-        manager, _position_updated_cb, 0, (void *)manager);
+    ret = location_manager_set_position_updated_cb(manager,
+                                                   _position_updated_cb,
+                                                   0 /* Period */,
+                                                   data /* Really? */);
+
+    if (ret != LOCATIONS_ERROR_NONE) {
+      dlog_print(DLOG_INFO, LOG_TAG,
+                 "[-] location_manager_set_position_updated_cb() failed. (%d)", ret);
+    }
+    ret = LOCATIONS_ERROR_NONE;
+
+    ret = location_manager_set_service_state_changed_cb(manager,
+                                                        __state_changed_cb,
+                                                        data /* Really? */);
+
+    if (ret != LOCATIONS_ERROR_NONE) {
+      dlog_print(DLOG_INFO, LOG_TAG,
+                 "[-] location_manager_set_state_changed_cb() failed. (%d)", ret);
+    }
   }
 }
 
@@ -113,30 +174,93 @@ destroy_location_service(void *data)
     ad->location = nullptr;
 }
 
+/* Create an app control for the alarm */
+// static bool
+// _initialize_alarm(void *data)
+// {
+//   appdata_s *ad = (appdata_s *) data;
+// 
+//   int ret;
+//   int DELAY = 120;
+//   int alarm_id;
+// 
+//   app_control_h app_control = nullptr;
+//   ret = app_control_create(&app_control);
+//   ret = app_control_set_operation(app_control, APP_CONTROL_OPERATION_DEFAULT);
+// 
+//   /* Set app_id as the name of the application */
+//   ret = app_control_set_app_id(app_control, "com.drunkare.debug");
+// 
+//   /* Set the key ("location") and value ("stop") of a bundle */
+//   ret = app_control_add_extra_data(app_control, "location", "stop");
+// 
+//   /* In order to be called after DELAY */
+//   ret = alarm_schedule_once_after_delay(app_control, DELAY, &alarm_id);
+//   if (ret != ALARM_ERROR_NONE) {
+//     char *err_msg = get_error_message(ret);
+//     dlog_print(DLOG_ERROR, LOG_TAG,
+//                "alarm_schedule_once_after_delay() failed.(%d)", ret);
+//     dlog_print(DLOG_INFO, LOG_TAG, "%s", err_msg);
+// 
+//     return false;
+//   }
+// 
+//   ad->alarm_id = alarm_id;
+// 
+//   ret = app_control_destroy(app_control);
+//   if (ret != APP_CONTROL_ERROR_NONE)
+//     dlog_print(DLOG_ERROR, LOG_TAG, "app_control_destroy() failed.(%d)", ret);
+//   else
+//     dlog_print(DLOG_DEBUG, LOG_TAG, "Set the triggered time with alarm_id: %d",
+//                ad->alarm_id);
+// 
+//   return true;
+// }
+
 static void
 start_location_service(void *data)
 {
   dlog_print(DLOG_INFO, LOG_TAG, "[+] start_location_service()");
 
   appdata_s *ad = (appdata_s *)data;
-  int ret;
+  int ret = 0;
 
   ret = location_manager_start(ad->location);
-  if (ret != LOCATIONS_ERROR_NONE)
-    dlog_print(DLOG_INFO, LOG_TAG,
-               "[-] location_manager_start() failed. (%d)", ret);
+  if (ad->location) {
+    if (ret != LOCATIONS_ERROR_NONE)
+      dlog_print(DLOG_ERROR, LOG_TAG, "location_manager_start() failed: %d",
+                 ret);
+    else
+      dlog_print(DLOG_DEBUG, LOG_TAG, "location service was started");
+
+    /* Create a app control for the alarm */
+    // ret = _initialize_alarm(ad);
+  }
 }
 
 static void
 stop_location_service(void *data)
 {
-  appdata_s *ad = (appdata_s *)data;
-  int ret;
+  dlog_print(DLOG_INFO, LOG_TAG, "[+] stop_location_service()");
 
-  ret = location_manager_stop(ad->location);
-  if (ret != LOCATIONS_ERROR_NONE)
-    dlog_print(DLOG_INFO, LOG_TAG,
-               "[-] location_manager_stop() failed. (%d)", ret);
+  appdata_s *ad = (appdata_s *)data;
+  int ret = 0;
+
+  if (ad->location) {
+    ret = location_manager_stop(ad->location);
+    if (ret != LOCATIONS_ERROR_NONE)
+      dlog_print(DLOG_ERROR, LOG_TAG, "location_manager_stop() failed: %d",
+                 ret);
+    else
+      dlog_print(DLOG_DEBUG, LOG_TAG, "location service was stopped.");
+
+    ad->location_available = false;
+
+    // if (ad->alarm_id) {
+    //   alarm_cancel(ad->alarm_id);
+    //   ad->alarm_id = 0;
+    // }
+  }
 }
 
 void
@@ -147,9 +271,18 @@ _position_updated_cb(double latitude, double longitude, double altitude,
 	int ret = 0;
 	appdata_s *ad = (appdata_s *) data;
 
-	sprintf(message, "<align=left>[%ld] lat[%f] lon[%f] alt[%f] (ret=%d)\n</align>",
-			timestamp, latitude, longitude, altitude, ret);
-	elm_entry_entry_set(ad->label, message);
+        ad->user_latitude = latitude;
+        ad->user_longitude = longitude;
+
+        sprintf(message, "(%f,%f)\n", latitude, longitude);
+        elm_object_text_set(ad->label, message);
+
+        dlog_print(DLOG_DEBUG, LOG_TAG, "[%ld] lat[%f] lon[%f] alt[%f] (ret=%d)",
+                   timestamp, latitude, longitude, altitude, ret);
+
+	// sprintf(message, "<align=left>[%ld] lat[%f] lon[%f] alt[%f] (ret=%d)\n</align>",
+	// 		timestamp, latitude, longitude, altitude, ret);
+	// elm_entry_entry_set(ad->label, message);
 
 	// stop_location_service(ad);
 }
@@ -171,6 +304,9 @@ app_request_response_cb(ppm_call_cause_e cause, ppm_request_result_e result,
   switch (result) {
   case PRIVACY_PRIVILEGE_MANAGER_REQUEST_RESULT_ALLOW_FOREVER:
     /* Update UI and start accessing protected functionality */
+
+    dlog_print(DLOG_INFO, LOG_TAG,
+               "[+] PRIVACY_PRIVILEGE_MANAGER_REQUEST_RESULT_ALLOW_FOREVER");
 
     if (!ad->location)
       /* Create location manager once */
@@ -196,6 +332,8 @@ app_check_and_request_permission(void *user_data)
 {
   ppm_check_result_e result;
   const char *privilege = "http://tizen.org/privilege/location";
+
+  dlog_print(DLOG_INFO, LOG_TAG, "[+] app_check_and_request_permission()");
 
   int ret = ppm_check_permission(privilege, &result);
 
@@ -510,7 +648,20 @@ app_create(void *data)
 static void
 app_control(app_control_h app_control, void *data)
 {
-	/* Handle the launch request. */
+  // /* Handle the launch request. */
+  // appdata_s *ad = (appdata_s *)data;
+  // char *value = NULL;
+
+  // dlog_print(DLOG_DEBUG, LOG_TAG, "app_control was called.");
+  // /* Check whether the key and value of the bundle are as expected */
+  // if (app_control_get_extra_data(app_control, "location", &value) ==
+  //     APP_CONTROL_ERROR_NONE) {
+  //   if (!strcmp(value, "stop")) {
+  //     if (ad->location)
+  //       stop_location_service(ad);
+  //   }
+  //   free(value);
+  // }
 }
 
 static void
