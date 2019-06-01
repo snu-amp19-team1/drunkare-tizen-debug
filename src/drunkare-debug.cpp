@@ -8,7 +8,9 @@
 #include <memory>
 
 // Tizen libraries
+#include <locations.h>
 #include <sensor.h>
+#include <privacy_privilege_manager.h>
 #include <efl_util.h>
 #include <device/power.h>
 #include <curl/curl.h>
@@ -37,6 +39,8 @@ struct appdata_s {
   Evas_Object *label;
   std::vector<Evas_Object *> startBtn;
   std::vector<Evas_Object *> stopBtn;
+  Evas_Object* lmCreateBtn;
+  Evas_Object* lmDestroyBtn;
   std::string response; // TODO: delete this
 
   // Extra app data
@@ -55,7 +59,9 @@ struct appdata_s {
   std::string filepath;
   std::string pathname;
 
-  appdata_s() : win(nullptr) {}
+  location_manager_h location;
+
+  appdata_s() : win(nullptr), location(nullptr) {}
 };
 
 static void win_delete_request_cb(void *data, Evas_Object *obj,
@@ -70,6 +76,147 @@ win_back_cb(void *data, Evas_Object *obj, void *event_info)
         /* Let window go to hide state. */
 	elm_win_lower(ad->win);
 }
+
+/*
+ * Location manager functions ================================
+ */
+static void
+create_location_service(void *data)
+{
+  appdata_s *ad = (appdata_s *)data;
+  location_manager_h manager;
+  int ret;
+
+  /* Create the location service to use all positioning source */
+  ret = location_manager_create(LOCATIONS_METHOD_HYBRID, &manager);
+  if (ret != LOCATIONS_ERROR_NONE) {
+    dlog_print(DLOG_INFO, LOG_TAG,
+               "[-] location_manager_create() failed. (%d)", ret);
+  } else {
+    ad->location = manager;
+    ret = location_manager_set_position_updated_cb(
+        manager, _position_updated_cb, 0, (void *)manager);
+  }
+}
+
+static void
+destroy_location_service(void *data)
+{
+  appdata_s *ad = (appdata_s *)data;
+  int ret;
+
+  ret = location_manager_destroy(ad->location);
+  if (ret != LOCATIONS_ERROR_NONE)
+    dlog_print(DLOG_INFO, LOG_TAG,
+               "[-] location_manager_destroy() failed. (%d)", ret);
+  else
+    ad->location = nullptr;
+}
+
+static void
+start_location_service(void *data)
+{
+  dlog_print(DLOG_INFO, LOG_TAG, "[+] start_location_service()");
+
+  appdata_s *ad = (appdata_s *)data;
+  int ret;
+
+  ret = location_manager_start(ad->location);
+  if (ret != LOCATIONS_ERROR_NONE)
+    dlog_print(DLOG_INFO, LOG_TAG,
+               "[-] location_manager_start() failed. (%d)", ret);
+}
+
+static void
+stop_location_service(void *data)
+{
+  appdata_s *ad = (appdata_s *)data;
+  int ret;
+
+  ret = location_manager_stop(ad->location);
+  if (ret != LOCATIONS_ERROR_NONE)
+    dlog_print(DLOG_INFO, LOG_TAG,
+               "[-] location_manager_stop() failed. (%d)", ret);
+}
+
+void
+_position_updated_cb(double latitude, double longitude, double altitude,
+		time_t timestamp, void *data)
+{
+	char message[128];
+	int ret = 0;
+	appdata_s *ad = (appdata_s *) data;
+
+	sprintf(message, "<align=left>[%ld] lat[%f] lon[%f] alt[%f] (ret=%d)\n</align>",
+			timestamp, latitude, longitude, altitude, ret);
+	elm_entry_entry_set(ad->label, message);
+
+	// stop_location_service(ad);
+}
+
+/*
+ * Privacy-related Permissions ================================
+ */
+
+void
+app_request_response_cb(ppm_call_cause_e cause, ppm_request_result_e result,
+                        const char *privilege, void *user_data)
+{
+  if (cause == PRIVACY_PRIVILEGE_MANAGER_CALL_CAUSE_ERROR) {
+    /* Log and handle errors */
+    return;
+  }
+
+  appdata_s *ad = (appdata_s *)user_data;
+  switch (result) {
+  case PRIVACY_PRIVILEGE_MANAGER_REQUEST_RESULT_ALLOW_FOREVER:
+    /* Update UI and start accessing protected functionality */
+
+    if (!ad->location)
+      /* Create location manager once */
+      create_location_service((void *)ad);
+
+    if (ad->location) {
+      start_location_service((void *)ad);
+    }
+    break;
+  case PRIVACY_PRIVILEGE_MANAGER_REQUEST_RESULT_DENY_FOREVER:
+    /* Show a message and terminate the application */
+    // exit(1);
+    break;
+  case PRIVACY_PRIVILEGE_MANAGER_REQUEST_RESULT_DENY_ONCE:
+    /* Show a message with explanation */
+    // exit(1);
+    break;
+  }
+}
+
+void
+app_check_and_request_permission(void *user_data)
+{
+  ppm_check_result_e result;
+  const char *privilege = "http://tizen.org/privilege/location";
+
+  int ret = ppm_check_permission(privilege, &result);
+
+  if (ret == PRIVACY_PRIVILEGE_MANAGER_ERROR_NONE) {
+    switch (result) {
+    case PRIVACY_PRIVILEGE_MANAGER_CHECK_RESULT_ALLOW:
+      /* Updata UI and start accessing protected functionality */
+      break;
+    case PRIVACY_PRIVILEGE_MANAGER_CHECK_RESULT_DENY:
+      /* Show a message and terminate the application */
+      break;
+    case PRIVACY_PRIVILEGE_MANAGER_CHECK_RESULT_ASK:
+      ret = ppm_request_permission(privilege, app_request_response_cb, user_data);
+      break;
+    }
+  } else {
+    /* ret != PRIVACY_PRIVILEGE_MANAGER_ERROR_NONE */
+    /* Handle errors! */
+  }
+}
+
 
 //
 // Main function for `netWorker`.
@@ -157,8 +304,6 @@ void sensorCb(sensor_h sensor, sensor_event_s *event, void *user_data)
     ad->tMeasures[sensor_type].push_back(
         std::make_unique<TMeasure>(ad->_measureId[sensor_type]++,
                                    sensor_type, ad->_context, timestamp));
-    // dlog_print(DLOG_DEBUG, LOG_TAG, "tMeasure ( %d ) is created.",
-    //            ad->_measureId[sensor_type] - 1);
   }
 
   // Tick (store values in Measure.data every periods)
@@ -166,9 +311,6 @@ void sensorCb(sensor_h sensor, sensor_event_s *event, void *user_data)
 
   // Check Measure->_done and enqueue
   if (ad->tMeasures[sensor_type].front()->_done) {
-    // dlog_print(DLOG_DEBUG, LOG_TAG, "tMeasure ( %d ) is done.",
-    //            ad->_measureId[sensor_type] - 1);
-
     ad->_doneMeasureId[sensor_type] = ad->tMeasures[sensor_type].front()->_id;
 
     ad->queue.enqueue(std::move(ad->tMeasures[sensor_type].front()));
@@ -346,15 +488,23 @@ create_base_gui(appdata_s *ad)
 static bool
 app_create(void *data)
 {
-	/* Hook to take necessary actions before main event loop starts
-		Initialize UI resources and application's data
-		If this function returns true, the main loop of application starts
-		If this function returns false, the application is terminated */
-	appdata_s *ad = (appdata_s *)data;
+  /* Hook to take necessary actions before main event loop starts
+     Initialize UI resources and application's data
+     If this function returns true, the main loop of application starts
+     If this function returns false, the application is terminated */
+  appdata_s *ad = (appdata_s *)data;
 
-	create_base_gui(ad);
+  create_base_gui(ad);
 
-	return true;
+  /* Ask for users to agree on location access */
+  app_check_and_request_permission(data);
+
+  // create_location_service(ad);
+
+  // if (ad->location)
+  //   start_location_service(ad);
+
+  return true;
 }
 
 static void
@@ -366,19 +516,31 @@ app_control(app_control_h app_control, void *data)
 static void
 app_pause(void *data)
 {
-	/* Take necessary actions when application becomes invisible. */
+  /* Take necessary actions when application becomes invisible. */
+  appdata_s *ad = (appdata_s *)data;
+
+  stop_location_service(ad);
 }
 
 static void
 app_resume(void *data)
 {
-	/* Take necessary actions when application becomes visible. */
+  /* Take necessary actions when application becomes visible. */
+  appdata_s *ad = (appdata_s *)data;
+
+  app_check_and_request_permission(data);
+
+  start_location_service(ad);
 }
 
 static void
 app_terminate(void *data)
 {
-	/* Release all resources. */
+  /* Release all resources. */
+  appdata_s *ad = (appdata_s *)data;
+
+  if (ad->location)
+    destroy_location_service(ad);
 }
 
 static void
