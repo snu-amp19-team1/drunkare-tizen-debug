@@ -104,11 +104,58 @@ void __position_updated_cb(double latitude, double longitude, double altitude,
   ad->user_latitude = latitude;
   ad->user_longitude = longitude;
 
-  sprintf(message, "(%f,%f)\n", latitude, longitude);
+  sprintf(message, "(%f,%f)\n", ad->user_latitude, ad->user_longitude);
   elm_object_text_set(ad->label, message);
+  evas_object_show(ad->label);
+
+  dlog_print(DLOG_DEBUG, LOG_TAG, "%d %d",
+             ad->_numWrite, ad->_deviceSamplingRate);
 
   dlog_print(DLOG_DEBUG, LOG_TAG, "[%ld] lat[%f] lon[%f] alt[%f] (ret=%d)",
              timestamp, latitude, longitude, altitude, ret);
+
+
+  /*
+   * Let's do CURL! =========================================
+   */
+  CURL* curl;
+  CURLcode res;
+  unsigned long long curl_timestamp = (unsigned long long)time(nullptr); // Hack!
+
+  std::ostringstream oss;
+  oss << "{\"timestamp\":" << curl_timestamp << ","
+    /* add user id? */
+      << "\"latitude\":" << ad->user_latitude << ","
+      << "\"longitude\":" << ad->user_latitude << "}";
+  std::string jsonObj = oss.str();
+
+  std::string url = "localhost:8080/location";
+
+  curl_global_init(CURL_GLOBAL_ALL);
+  curl = curl_easy_init();
+
+  struct curl_slist *headers = NULL;
+  headers = curl_slist_append(headers, "Content-Type: application/json");
+  headers = curl_slist_append(headers, "charsets: utf-8");
+
+  curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+  curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "POST");
+  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+  curl_easy_setopt(curl, CURLOPT_POSTFIELDS, jsonObj.c_str());
+
+  res = curl_easy_perform(curl);
+  if (res != CURLE_OK) {
+    pthread_exit(NULL);
+
+    for (auto button : ad->startBtn) {
+      elm_object_disabled_set(button, EINA_FALSE);
+    }
+  }
+  /* end CURL... */
+
+  curl_easy_cleanup(curl);
+  curl_global_cleanup();
+  usleep(3000);
 
   // sprintf(message, "<align=left>[%ld] lat[%f] lon[%f] alt[%f]
   // (ret=%d)\n</align>", 		timestamp, latitude, longitude, altitude, ret);
@@ -165,8 +212,8 @@ create_location_service(void *data)
     ad->location = manager;
     ret = location_manager_set_position_updated_cb(manager,
                                                    __position_updated_cb,
-                                                   2 /* Period */,
-                                                   (void *) manager /* Really? */);
+                                                   12 /* Period */,
+                                                   data /* Really? */);
 
     if (ret != LOCATIONS_ERROR_NONE) {
       dlog_print(DLOG_INFO, LOG_TAG,
@@ -176,7 +223,7 @@ create_location_service(void *data)
 
     ret = location_manager_set_service_state_changed_cb(manager,
                                                         __state_changed_cb,
-                                                        (void *) manager /* Really? */);
+                                                        data /* Really? */);
 
     if (ret != LOCATIONS_ERROR_NONE) {
       dlog_print(DLOG_INFO, LOG_TAG,
@@ -545,6 +592,8 @@ static void startBtnClickedCb(void *data, Evas_Object *obj, void *event_info)
 static void stopBtnClickedCb(void *data, Evas_Object *obj, void *event_info)
 {
   stopMeasurement((appdata_s*)data);
+
+  stop_location_service(data);
 }
 
 static void
@@ -672,7 +721,7 @@ app_pause(void *data)
   /* Take necessary actions when application becomes invisible. */
   appdata_s *ad = (appdata_s *)data;
 
-  stop_location_service(ad);
+  // stop_location_service(ad);
 }
 
 static void
@@ -691,6 +740,8 @@ app_terminate(void *data)
 {
   /* Release all resources. */
   appdata_s *ad = (appdata_s *)data;
+
+  stop_location_service(data);
 
   if (ad->location)
     destroy_location_service(ad);
