@@ -92,6 +92,31 @@ win_back_cb(void *data, Evas_Object *obj, void *event_info)
 /*
  * Location manager functions ================================
  */
+
+void __position_updated_cb(double latitude, double longitude, double altitude,
+                           time_t timestamp, void *user_data)
+{
+  char message[128];
+  int ret = 0;
+  appdata_s *ad = (appdata_s *) user_data;
+
+  ad->location_available = true;
+  ad->user_latitude = latitude;
+  ad->user_longitude = longitude;
+
+  sprintf(message, "(%f,%f)\n", latitude, longitude);
+  elm_object_text_set(ad->label, message);
+
+  dlog_print(DLOG_DEBUG, LOG_TAG, "[%ld] lat[%f] lon[%f] alt[%f] (ret=%d)",
+             timestamp, latitude, longitude, altitude, ret);
+
+  // sprintf(message, "<align=left>[%ld] lat[%f] lon[%f] alt[%f]
+  // (ret=%d)\n</align>", 		timestamp, latitude, longitude, altitude, ret);
+  // elm_entry_entry_set(ad->label, message);
+
+  // stop_location_service(ad);
+}
+
 static void
 __state_changed_cb(location_service_state_e state, void* user_data)
 {
@@ -139,9 +164,9 @@ create_location_service(void *data)
   } else {
     ad->location = manager;
     ret = location_manager_set_position_updated_cb(manager,
-                                                   _position_updated_cb,
-                                                   0 /* Period */,
-                                                   data /* Really? */);
+                                                   __position_updated_cb,
+                                                   2 /* Period */,
+                                                   (void *) manager /* Really? */);
 
     if (ret != LOCATIONS_ERROR_NONE) {
       dlog_print(DLOG_INFO, LOG_TAG,
@@ -151,7 +176,7 @@ create_location_service(void *data)
 
     ret = location_manager_set_service_state_changed_cb(manager,
                                                         __state_changed_cb,
-                                                        data /* Really? */);
+                                                        (void *) manager /* Really? */);
 
     if (ret != LOCATIONS_ERROR_NONE) {
       dlog_print(DLOG_INFO, LOG_TAG,
@@ -263,29 +288,6 @@ stop_location_service(void *data)
   }
 }
 
-void
-_position_updated_cb(double latitude, double longitude, double altitude,
-		time_t timestamp, void *data)
-{
-	char message[128];
-	int ret = 0;
-	appdata_s *ad = (appdata_s *) data;
-
-        ad->user_latitude = latitude;
-        ad->user_longitude = longitude;
-
-        sprintf(message, "(%f,%f)\n", latitude, longitude);
-        elm_object_text_set(ad->label, message);
-
-        dlog_print(DLOG_DEBUG, LOG_TAG, "[%ld] lat[%f] lon[%f] alt[%f] (ret=%d)",
-                   timestamp, latitude, longitude, altitude, ret);
-
-	// sprintf(message, "<align=left>[%ld] lat[%f] lon[%f] alt[%f] (ret=%d)\n</align>",
-	// 		timestamp, latitude, longitude, altitude, ret);
-	// elm_entry_entry_set(ad->label, message);
-
-	// stop_location_service(ad);
-}
 
 /*
  * Privacy-related Permissions ================================
