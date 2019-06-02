@@ -70,10 +70,12 @@ struct appdata_s {
   int alarm_id;
 
   bool location_available;
+  bool location_service_is_running;
   double user_latitude;
   double user_longitude;
 
-  appdata_s() : win(nullptr), location(nullptr), location_available(false) {}
+  appdata_s(): win(nullptr), location(nullptr), location_available(false),
+               location_service_is_running(false) {}
 };
 
 static void win_delete_request_cb(void *data, Evas_Object *obj,
@@ -298,13 +300,23 @@ start_location_service(void *data)
   appdata_s *ad = (appdata_s *)data;
   int ret = 0;
 
+  if (ad->location_service_is_running) {
+    /* Location servuce is always running */
+    dlog_print(DLOG_WARN, LOG_TAG,
+               "[-] start_location_service() is invoked while service is already running");
+    return;
+  }
+
   ret = location_manager_start(ad->location);
   if (ad->location) {
-    if (ret != LOCATIONS_ERROR_NONE)
+    if (ret != LOCATIONS_ERROR_NONE) {
       dlog_print(DLOG_ERROR, LOG_TAG, "location_manager_start() failed: %d",
                  ret);
-    else
+    } else {
       dlog_print(DLOG_DEBUG, LOG_TAG, "location service was started");
+      ad->location_service_is_running = true;
+    }
+
 
     /* Create a app control for the alarm */
     // ret = _initialize_alarm(ad);
@@ -319,13 +331,22 @@ stop_location_service(void *data)
   appdata_s *ad = (appdata_s *)data;
   int ret = 0;
 
+  if (!ad->location_service_is_running) {
+    /* Location servuce is NOT running */
+    dlog_print(DLOG_WARN, LOG_TAG,
+               "[-] stop_location_service() is invoked while service is not running");
+    return;
+  }
+
   if (ad->location) {
     ret = location_manager_stop(ad->location);
-    if (ret != LOCATIONS_ERROR_NONE)
+    if (ret != LOCATIONS_ERROR_NONE) {
       dlog_print(DLOG_ERROR, LOG_TAG, "location_manager_stop() failed: %d",
                  ret);
-    else
+    } else {
       dlog_print(DLOG_DEBUG, LOG_TAG, "location service was stopped.");
+      ad->location_service_is_running = false;
+    }
 
     ad->location_available = false;
 
@@ -522,6 +543,16 @@ void sensorCb(sensor_h sensor, sensor_event_s *event, void *user_data)
 
 static void startMeasurement(appdata_s *ad)
 {
+  /* NOTE that is is very less likely to be here, since we disable
+     button while measuring */
+  if (ad->_isMeasuring) {
+    /* sensor servuce is already running */
+    dlog_print(DLOG_WARN, LOG_TAG,
+               "[-] startMeasurement() is invoked while sensor service is already running");
+    return;
+  }
+
+
   ad->queue.clear();
 
   // See https://stackoverflow.com/questions/49752776
@@ -546,6 +577,13 @@ static void startMeasurement(appdata_s *ad)
 
 static void stopMeasurement(appdata_s *ad)
 {
+  if (!ad->_isMeasuring) {
+    /* sensor servuce is NOT running */
+    dlog_print(DLOG_WARN, LOG_TAG,
+               "[-] stopMeasurement() is invoked while sensor service is not running");
+    return;
+  }
+
   ad->_isMeasuring = false;
 
   device_power_release_lock(POWER_LOCK_CPU);
@@ -588,6 +626,9 @@ static void startBtnClickedCb(void *data, Evas_Object *obj, void *event_info)
 
     startMeasurement(ad);
   }
+
+  /* Used to restart location service stopped by user */
+  start_location_service(data);
 }
 
 static void stopBtnClickedCb(void *data, Evas_Object *obj, void *event_info)
