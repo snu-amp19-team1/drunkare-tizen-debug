@@ -124,12 +124,13 @@ void __position_updated_cb(double latitude, double longitude, double altitude,
 
   std::ostringstream oss;
   oss << "{\"timestamp\":" << curl_timestamp << ","
-    /* add user id? */
+      << "\"user_id\":0," /* dummy user_id */
       << "\"latitude\":" << ad->user_latitude << ","
-      << "\"longitude\":" << ad->user_latitude << "}";
+      << "\"longitude\":" << ad->user_longitude << "}";
   std::string jsonObj = oss.str();
 
-  std::string url = "localhost:8080/location";
+  // {url}:{port}/location
+  std::string url = "localhost:8080/location/";
 
   curl_global_init(CURL_GLOBAL_ALL);
   curl = curl_easy_init();
@@ -425,7 +426,7 @@ static void* netWorkerJob(void* data) {
 
     std::string jsonObj = tMeasure->formatJson();
 
-    // {url}:{port}/{username}
+    // {url}:{port}/data
     std::string url = "localhost:8080/data/";
 
     /* Curl POST */
