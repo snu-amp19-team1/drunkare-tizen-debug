@@ -1,5 +1,6 @@
 #include <string>
 #include <iostream>
+#include <iomanip>
 #include <fstream>
 #include <queue>
 #include <deque>
@@ -127,8 +128,8 @@ void __position_updated_cb(double latitude, double longitude, double altitude,
   std::ostringstream oss;
   oss << "{\"timestamp\":" << curl_timestamp << ","
       << "\"user_id\":0," /* dummy user_id */
-      << "\"latitude\":" << ad->user_latitude << ","
-      << "\"longitude\":" << ad->user_longitude << "}";
+      << "\"latitude\":" << std::setprecision(8) << ad->user_latitude << ","
+      << "\"longitude\":" << std::setprecision(8) << ad->user_longitude << "}";
   std::string jsonObj = oss.str();
 
   // {url}:{port}/location
