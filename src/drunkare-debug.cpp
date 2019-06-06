@@ -76,6 +76,8 @@ struct appdata_s {
   double user_latitude;
   double user_longitude;
 
+  std::string app_state;
+
   appdata_s(): win(nullptr), location(nullptr), location_available(false),
                location_service_is_running(false) {}
 };
@@ -100,7 +102,6 @@ bool init_alarm()
 {
   int ret;
   int DELAY = 2;
-  int REMIND = 1;
   int alarm_id;
   app_control_h app_control = nullptr;
 
@@ -113,12 +114,33 @@ bool init_alarm()
   ret = alarm_get_current_time(&date);
 
   time_t time_current = mktime(&date);
-  // dlog_print(DLOG_INFO, LOG_TAG, "Scheduled on date: %s ", ctime(&time_current));
 
-  struct tm date_delay = date;
-  date_delay.tm_sec += 4;
+  /* Enable alarm at 6 pm */
+  struct tm date_enable = date;
+  date_enable.tm_hour = 18;
 
-  ret = alarm_schedule_with_recurrence_week_flag(app_control, &date,
+  /* Disable alarm at 0 am */
+  struct tm data_disable = date;
+  date_enable.tm_hour = 3;
+
+  /* Set the key ("status") and value ("init") of a bundle */
+  ret = app_control_add_extra_data(app_control, "status", "init");
+  if (ret != APP_CONTROL_ERROR_NONE)
+    dlog_print(DLOG_ERROR, LOG_TAG, "[-] app_control_add_extra_data (%d)", ret);
+
+  /* Initial alarm */
+  ret = alarm_schedule_once_after_delay(app_control, DELAY, &alarm_id);
+  if (ret != ALARM_ERROR_NONE) {
+    char *err_msg = get_error_message(ret);
+    dlog_print(DLOG_ERROR, LOG_TAG,
+               "alarm_schedule_once_after_delay() failed.(%d)", ret);
+    dlog_print(DLOG_INFO, LOG_TAG, "%s", err_msg);
+
+    return false;
+  }
+
+  /* Schedule enable alarm */
+  ret = alarm_schedule_with_recurrence_week_flag(app_control, &date_enable,
                                                  ALARM_WEEK_FLAG_MONDAY|
                                                  ALARM_WEEK_FLAG_TUESDAY |
                                                  ALARM_WEEK_FLAG_WEDNESDAY |
@@ -127,6 +149,19 @@ bool init_alarm()
                                                  ALARM_WEEK_FLAG_SATURDAY |
                                                  ALARM_WEEK_FLAG_SUNDAY,
                                                  &alarm_id);
+  
+  /* Scherule disable alarm */
+  ret = alarm_schedule_with_recurrence_week_flag(app_control, &date_disable,
+                                                 ALARM_WEEK_FLAG_MONDAY|
+                                                 ALARM_WEEK_FLAG_TUESDAY |
+                                                 ALARM_WEEK_FLAG_WEDNESDAY |
+                                                 ALARM_WEEK_FLAG_THURSDAY |
+                                                 ALARM_WEEK_FLAG_FRIDAY |
+                                                 ALARM_WEEK_FLAG_SATURDAY |
+                                                 ALARM_WEEK_FLAG_SUNDAY,
+                                                 &alarm_id);
+
+
 
   return true;
 }
@@ -164,10 +199,10 @@ static bool on_foreach_registered_alarm(int alarm_id, void *user_data) {
       dlog_print(DLOG_INFO, LOG_TAG, "Alarm Recurrence on SATURDAY \n");
   }
 
-  /* Cancel scheduled alarms */
-  ret = alarm_cancel(alarm_id);
-  if (ret != ALARM_ERROR_NONE)
-    dlog_print(DLOG_ERROR, LOG_TAG, "Cancel Error: %d ", ret);
+  // /* Cancel scheduled alarms */
+  // ret = alarm_cancel(alarm_id);
+  // if (ret != ALARM_ERROR_NONE)
+  //   dlog_print(DLOG_ERROR, LOG_TAG, "Cancel Error: %d ", ret);
 
   return true;
 }
@@ -227,15 +262,15 @@ void __position_updated_cb(double latitude, double longitude, double altitude,
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
   curl_easy_setopt(curl, CURLOPT_POSTFIELDS, jsonObj.c_str());
 
-  // res = curl_easy_perform(curl);
-  // if (res != CURLE_OK) {
-  //   pthread_exit(NULL);
+  res = curl_easy_perform(curl);
+  if (res != CURLE_OK) {
+    pthread_exit(NULL);
 
-  //   for (auto button : ad->startBtn) {
-  //     elm_object_disabled_set(button, EINA_FALSE);
-  //   }
-  // }
-  // /* end CURL... */
+    for (auto button : ad->startBtn) {
+      elm_object_disabled_set(button, EINA_FALSE);
+    }
+  }
+  /* end CURL... */
 
   curl_easy_cleanup(curl);
   curl_global_cleanup();
@@ -501,14 +536,14 @@ static void* netWorkerJob(void* data) {
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, jsonObj.c_str());
 
-    // res = curl_easy_perform(curl);
-    // if (res != CURLE_OK) {
-    // 	pthread_exit(NULL);
+    res = curl_easy_perform(curl);
+    if (res != CURLE_OK) {
+    	pthread_exit(NULL);
 
-    //     for (auto button : ad->startBtn) {
-    //       elm_object_disabled_set(button, EINA_FALSE);
-    //     }
-    // }
+        for (auto button : ad->startBtn) {
+          elm_object_disabled_set(button, EINA_FALSE);
+        }
+    }
 
     curl_easy_cleanup(curl);
     curl_global_cleanup();
@@ -581,6 +616,8 @@ void sensorCb(sensor_h sensor, sensor_event_s *event, void *user_data)
 
 static void startMeasurement(appdata_s *ad)
 {
+  dlog_print(DLOG_INFO, LOG_TAG, "[+] start (sensor) measurement");
+
   /* NOTE that is is very less likely to be here, since we disable
      button while measuring */
   if (ad->_isMeasuring) {
@@ -615,6 +652,8 @@ static void startMeasurement(appdata_s *ad)
 
 static void stopMeasurement(appdata_s *ad)
 {
+  dlog_print(DLOG_INFO, LOG_TAG, "[+] stop (sensor) measurement");
+
   if (!ad->_isMeasuring) {
     /* sensor servuce is NOT running */
     dlog_print(DLOG_WARN, LOG_TAG,
@@ -657,16 +696,15 @@ static void startBtnClickedCb(void *data, Evas_Object *obj, void *event_info)
 
   ad->_context = 0;
 
-  if (!ad->_isMeasuring) {
+  if (!ad->_isMeasuring)
     for (auto button : ad->startBtn) {
       elm_object_disabled_set(button, EINA_TRUE);
     }
 
-    startMeasurement(ad);
-  }
+  startMeasurement(ad);
 
   /* Used to restart location service stopped by user */
-  start_location_service(data);
+  // start_location_service(data);
 }
 
 static void stopBtnClickedCb(void *data, Evas_Object *obj, void *event_info)
@@ -750,6 +788,8 @@ create_base_gui(appdata_s *ad)
         ad->filepath = std::string(app_get_data_path());
         ad->pathname = ad->filepath + std::string("data.csv");
 
+        ad->app_state = "init";
+
         /* Show window after base gui is set up */
 	evas_object_show(ad->win);
 }
@@ -778,16 +818,120 @@ app_create(void *data)
   return true;
 }
 
+bool is_night()
+{
+  dlog_print(DLOG_WARN, LOG_TAG, "[+] is_night()");
+
+  struct tm date;
+  int ret;
+
+  ret = alarm_get_current_time(&date);
+
+  /* This can be configured */
+  if (date.tm_hour >= 18 || date.tm_hour < 3) {
+    dlog_print(DLOG_WARN, LOG_TAG, "[+] is_night(): true");
+    return true;
+  }
+
+  dlog_print(DLOG_WARN, LOG_TAG, "[+] is_night(): false");
+  return false;
+}
+
+bool fake_is_night(bool __fake_is_night)
+{
+  return __fake_is_night;
+}
+
+/* Update app state and start/stop sensor/location services */
+static void
+update_app_state(const std::string& app_state, void *data)
+{
+  appdata_s *ad = (appdata_s *)data;
+  const std::string current_app_state = ad->app_state;
+
+  dlog_print(DLOG_INFO, LOG_TAG, "[+] update_app_state (%s)->(%s)",
+             current_app_state.c_str(), app_state.c_str());
+
+  // TODO: cleanup logic?
+  if (current_app_state == "init") {
+    if (app_state == "on") {
+      startMeasurement(ad);
+      start_location_service(data);
+      ad->app_state = "on";
+    } else if (app_state == "off") {
+      /* don't need to stop services since they are not running */
+      ad->app_state = "off";
+    } else {
+      dlog_print(DLOG_WARN, LOG_TAG, "invalid transition from INIT");
+    }
+  } else if (current_app_state == "on") {
+    if (app_state == "off") {
+      stopMeasurement(ad);
+      stop_location_service(data);
+      ad->app_state = "off";
+    } else {
+      dlog_print(DLOG_WARN, LOG_TAG, "invalid transition from ON");
+    }
+  } else if (current_app_state == "off") {
+    if (app_state == "on") {
+      startMeasurement(ad);
+      start_location_service(data);
+      ad->app_state = "on";
+    } else {
+      dlog_print(DLOG_WARN, LOG_TAG, "invalid transition from OFF");
+    }
+  }
+}
+
 /* Callback invoked by calling an app control */
 static void
 app_control(app_control_h app_control, void *data)
 {
   int ret;
+  char *value;
+  appdata_s *ad = (appdata_s *)data;
+  std::string state = ad->app_state, next_state = "";
   dlog_print(DLOG_DEBUG, LOG_TAG, "app_control was called.");
 
-  ret = alarm_foreach_registered_alarm(on_foreach_registered_alarm, nullptr);
-  if (ret != ALARM_ERROR_NONE)
-    dlog_print(DLOG_ERROR, LOG_TAG, "Listing Error: %d ", ret);
+  // ret = alarm_foreach_registered_alarm(on_foreach_registered_alarm, nullptr);
+  // if (ret != ALARM_ERROR_NONE)
+  //   dlog_print(DLOG_ERROR, LOG_TAG, "Listing Error: %d ", ret);
+
+  if (state == "init") {
+    /* init state */
+    dlog_print(DLOG_DEBUG, LOG_TAG, "[+] ad->app_state == init");
+
+    // if (fake_is_night(true))
+    if (is_night()) {
+      next_state = "on";
+    else
+      next_state = "off";
+
+  } else if (state == "on") {
+    /* on state */
+    dlog_print(DLOG_DEBUG, LOG_TAG, "[+] ad->app_state == on");
+
+    // if (fake_is_night(false))
+    if (is_night())
+      dlog_print(DLOG_WARN, LOG_TAG, "app_control is_night() && status == on");
+    else
+      /* on --> off */
+      next_state = "off";
+
+  } else if (state == "off") {
+    /* off state */
+    dlog_print(DLOG_DEBUG, LOG_TAG, "[+] ad->state == off");
+
+    // if (fake_is_night(true))
+    if (is_night())
+      next_state = "on";
+    else
+      dlog_print(DLOG_WARN, LOG_TAG,
+                 "app_control !is_night() && status == off");
+  }
+
+  /* main function for starting/stopping sensor/location services */
+  update_app_state(next_state, data);
 }
 
 static void
@@ -807,7 +951,7 @@ app_resume(void *data)
 
   app_check_and_request_permission(data);
 
-  start_location_service(ad);
+  // start_location_service(ad);
 }
 
 static void
