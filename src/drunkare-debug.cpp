@@ -11,6 +11,7 @@
 // Tizen libraries
 #include <locations.h>
 #include <sensor.h>
+#include <time.h>
 #include <privacy_privilege_manager.h>
 #include <efl_util.h>
 #include <service_app.h>
@@ -93,6 +94,85 @@ win_back_cb(void *data, Evas_Object *obj, void *event_info)
 }
 
 /*
+ * Alarm manager functions ==================================
+ */
+bool init_alarm()
+{
+  int ret;
+  int DELAY = 2;
+  int REMIND = 1;
+  int alarm_id;
+  app_control_h app_control = nullptr;
+
+  ret = app_control_create(&app_control);
+  ret = app_control_set_operation(app_control,
+                                  APP_CONTROL_OPERATION_DEFAULT);
+  ret = app_control_set_app_id(app_control, "com.drunkare.debug");
+
+  struct tm date;
+  ret = alarm_get_current_time(&date);
+
+  time_t time_current = mktime(&date);
+  // dlog_print(DLOG_INFO, LOG_TAG, "Scheduled on date: %s ", ctime(&time_current));
+
+  struct tm date_delay = date;
+  date_delay.tm_sec += 4;
+
+  ret = alarm_schedule_with_recurrence_week_flag(app_control, &date,
+                                                 ALARM_WEEK_FLAG_MONDAY|
+                                                 ALARM_WEEK_FLAG_TUESDAY |
+                                                 ALARM_WEEK_FLAG_WEDNESDAY |
+                                                 ALARM_WEEK_FLAG_THURSDAY |
+                                                 ALARM_WEEK_FLAG_FRIDAY |
+                                                 ALARM_WEEK_FLAG_SATURDAY |
+                                                 ALARM_WEEK_FLAG_SUNDAY,
+                                                 &alarm_id);
+
+  return true;
+}
+
+static bool on_foreach_registered_alarm(int alarm_id, void *user_data) {
+  int flag;
+  int ret = 0;
+  struct tm date;
+  time_t time_current;
+
+  ret = alarm_get_scheduled_date(alarm_id, &date);
+  if (ret != ALARM_ERROR_NONE)
+    dlog_print(DLOG_ERROR, LOG_TAG, "Get time Error: %d ", ret);
+
+  /* Logging scheduled alarm info */
+  time_current = mktime(&date);
+  dlog_print(DLOG_INFO, LOG_TAG, "Registered alarm: %d on date: %s ", alarm_id,
+             ctime(&time_current));
+
+  ret = alarm_get_scheduled_recurrence_week_flag(alarm_id, &flag);
+  if (ret == 0) {
+    if (flag & ALARM_WEEK_FLAG_SUNDAY)
+      dlog_print(DLOG_INFO, LOG_TAG, "Alarm Recurrence on SUNDAY \n");
+    if (flag & ALARM_WEEK_FLAG_MONDAY)
+      dlog_print(DLOG_INFO, LOG_TAG, "Alarm Recurrence on MONDAY \n");
+    if (flag & ALARM_WEEK_FLAG_TUESDAY)
+      dlog_print(DLOG_INFO, LOG_TAG, "Alarm Recurrence on TUESDAY \n");
+    if (flag & ALARM_WEEK_FLAG_WEDNESDAY)
+      dlog_print(DLOG_INFO, LOG_TAG, "Alarm Recurrence on WEDNESDAY \n");
+    if (flag & ALARM_WEEK_FLAG_THURSDAY)
+      dlog_print(DLOG_INFO, LOG_TAG, "Alarm Recurrence on THURSDAY \n");
+    if (flag & ALARM_WEEK_FLAG_FRIDAY)
+      dlog_print(DLOG_INFO, LOG_TAG, "Alarm Recurrence on FRIDAY \n");
+    if (flag & ALARM_WEEK_FLAG_SATURDAY)
+      dlog_print(DLOG_INFO, LOG_TAG, "Alarm Recurrence on SATURDAY \n");
+  }
+
+  /* Cancel scheduled alarms */
+  ret = alarm_cancel(alarm_id);
+  if (ret != ALARM_ERROR_NONE)
+    dlog_print(DLOG_ERROR, LOG_TAG, "Cancel Error: %d ", ret);
+
+  return true;
+}
+
+/*
  * Location manager functions ================================
  */
 
@@ -147,15 +227,15 @@ void __position_updated_cb(double latitude, double longitude, double altitude,
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
   curl_easy_setopt(curl, CURLOPT_POSTFIELDS, jsonObj.c_str());
 
-  res = curl_easy_perform(curl);
-  if (res != CURLE_OK) {
-    pthread_exit(NULL);
+  // res = curl_easy_perform(curl);
+  // if (res != CURLE_OK) {
+  //   pthread_exit(NULL);
 
-    for (auto button : ad->startBtn) {
-      elm_object_disabled_set(button, EINA_FALSE);
-    }
-  }
-  /* end CURL... */
+  //   for (auto button : ad->startBtn) {
+  //     elm_object_disabled_set(button, EINA_FALSE);
+  //   }
+  // }
+  // /* end CURL... */
 
   curl_easy_cleanup(curl);
   curl_global_cleanup();
@@ -249,49 +329,6 @@ destroy_location_service(void *data)
   else
     ad->location = nullptr;
 }
-
-/* Create an app control for the alarm */
-// static bool
-// _initialize_alarm(void *data)
-// {
-//   appdata_s *ad = (appdata_s *) data;
-// 
-//   int ret;
-//   int DELAY = 120;
-//   int alarm_id;
-// 
-//   app_control_h app_control = nullptr;
-//   ret = app_control_create(&app_control);
-//   ret = app_control_set_operation(app_control, APP_CONTROL_OPERATION_DEFAULT);
-// 
-//   /* Set app_id as the name of the application */
-//   ret = app_control_set_app_id(app_control, "com.drunkare.debug");
-// 
-//   /* Set the key ("location") and value ("stop") of a bundle */
-//   ret = app_control_add_extra_data(app_control, "location", "stop");
-// 
-//   /* In order to be called after DELAY */
-//   ret = alarm_schedule_once_after_delay(app_control, DELAY, &alarm_id);
-//   if (ret != ALARM_ERROR_NONE) {
-//     char *err_msg = get_error_message(ret);
-//     dlog_print(DLOG_ERROR, LOG_TAG,
-//                "alarm_schedule_once_after_delay() failed.(%d)", ret);
-//     dlog_print(DLOG_INFO, LOG_TAG, "%s", err_msg);
-// 
-//     return false;
-//   }
-// 
-//   ad->alarm_id = alarm_id;
-// 
-//   ret = app_control_destroy(app_control);
-//   if (ret != APP_CONTROL_ERROR_NONE)
-//     dlog_print(DLOG_ERROR, LOG_TAG, "app_control_destroy() failed.(%d)", ret);
-//   else
-//     dlog_print(DLOG_DEBUG, LOG_TAG, "Set the triggered time with alarm_id: %d",
-//                ad->alarm_id);
-// 
-//   return true;
-// }
 
 static void
 start_location_service(void *data)
@@ -464,14 +501,14 @@ static void* netWorkerJob(void* data) {
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, jsonObj.c_str());
 
-    res = curl_easy_perform(curl);
-    if (res != CURLE_OK) {
-    	pthread_exit(NULL);
+    // res = curl_easy_perform(curl);
+    // if (res != CURLE_OK) {
+    // 	pthread_exit(NULL);
 
-        for (auto button : ad->startBtn) {
-          elm_object_disabled_set(button, EINA_FALSE);
-        }
-    }
+    //     for (auto button : ad->startBtn) {
+    //       elm_object_disabled_set(button, EINA_FALSE);
+    //     }
+    // }
 
     curl_easy_cleanup(curl);
     curl_global_cleanup();
@@ -736,26 +773,21 @@ app_create(void *data)
   // if (ad->location)
   //   start_location_service(ad);
 
+  init_alarm();
+
   return true;
 }
 
+/* Callback invoked by calling an app control */
 static void
 app_control(app_control_h app_control, void *data)
 {
-  // /* Handle the launch request. */
-  // appdata_s *ad = (appdata_s *)data;
-  // char *value = NULL;
+  int ret;
+  dlog_print(DLOG_DEBUG, LOG_TAG, "app_control was called.");
 
-  // dlog_print(DLOG_DEBUG, LOG_TAG, "app_control was called.");
-  // /* Check whether the key and value of the bundle are as expected */
-  // if (app_control_get_extra_data(app_control, "location", &value) ==
-  //     APP_CONTROL_ERROR_NONE) {
-  //   if (!strcmp(value, "stop")) {
-  //     if (ad->location)
-  //       stop_location_service(ad);
-  //   }
-  //   free(value);
-  // }
+  ret = alarm_foreach_registered_alarm(on_foreach_registered_alarm, nullptr);
+  if (ret != ALARM_ERROR_NONE)
+    dlog_print(DLOG_ERROR, LOG_TAG, "Listing Error: %d ", ret);
 }
 
 static void
