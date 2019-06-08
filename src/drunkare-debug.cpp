@@ -27,7 +27,7 @@
 #define NUM_SENSORS 2
 #define NUM_CHANNELS 3
 #define NUM_CONTEXTS 4
-#define DURATION 12 // seconds
+#define DURATION 60 // seconds
 #define CONTEXT_DURATION 60 * 60 * 24 // seconds
 #define MAX_MEASURE_ID (CONTEXT_DURATION / DURATION)
 #define ACCELEROMETER 0
@@ -133,7 +133,7 @@ void __position_updated_cb(double latitude, double longitude, double altitude,
   std::string jsonObj = oss.str();
 
   // {url}:{port}/location
-  std::string url = "localhost:8080/location/";
+  std::string url = "localhost:8080/data/gps";
 
   curl_global_init(CURL_GLOBAL_ALL);
   curl = curl_easy_init();
@@ -216,7 +216,7 @@ create_location_service(void *data)
     ad->location = manager;
     ret = location_manager_set_position_updated_cb(manager,
                                                    __position_updated_cb,
-                                                   12 /* Period */,
+                                                   60 /* Period */,
                                                    data /* Really? */);
 
     if (ret != LOCATIONS_ERROR_NONE) {
@@ -318,9 +318,11 @@ start_location_service(void *data)
       ad->location_service_is_running = true;
     }
 
-
     /* Create a app control for the alarm */
     // ret = _initialize_alarm(ad);
+  } else {
+    dlog_print(DLOG_ERROR, LOG_TAG, "[-] ad->location == nullptr");
+    create_location_service(data);
   }
 }
 
@@ -544,6 +546,8 @@ void sensorCb(sensor_h sensor, sensor_event_s *event, void *user_data)
 
 static void startMeasurement(appdata_s *ad)
 {
+  dlog_print(DLOG_INFO, LOG_TAG, "[+] start_location_service()");
+
   /* NOTE that is is very less likely to be here, since we disable
      button while measuring */
   if (ad->_isMeasuring) {
@@ -578,6 +582,8 @@ static void startMeasurement(appdata_s *ad)
 
 static void stopMeasurement(appdata_s *ad)
 {
+  dlog_print(DLOG_INFO, LOG_TAG, "[+] stop_location_service()");
+
   if (!ad->_isMeasuring) {
     /* sensor servuce is NOT running */
     dlog_print(DLOG_WARN, LOG_TAG,
